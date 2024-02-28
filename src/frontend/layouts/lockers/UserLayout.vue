@@ -10,7 +10,7 @@
       style="padding-top: 10px"
     />
     <locker-view
-      v-if="lockersLoaded"
+      v-if="lockersLoaded && (existingLockers.size || historyLockers.size)"
       class="un-inner-right"
       :device-id="currentDeviceId"
       :device="currentDevice!"
@@ -20,7 +20,7 @@
       class="un-empty-inner is-flex justify-center items-center"
       v-if="!(existingLockers.size || historyLockers.size)"
     >
-      <el-empty description="You don't have assigned device yet" />
+      <el-empty description="You don't have assigned locker yet" />
     </el-main>
   </el-container>
 </template>

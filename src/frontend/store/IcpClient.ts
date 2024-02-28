@@ -1,77 +1,71 @@
 import { defineStore } from 'pinia'
-import { computed, ref, watch, watchEffect } from 'vue'
+import { computed, ref, watch } from 'vue'
 import router from '@/router'
-import { AuthClient } from '@dfinity/auth-client'
-import { ActorSubclass, HttpAgent, Identity } from '@dfinity/agent'
-import { createActor } from '@/../declarations/lockers_backend'
-import { _SERVICE, LockerDto, UserDto } from '@/../declarations/lockers_backend/lockers_backend.did'
-import { UserRole } from '@/types/user'
+import { LockerDto, UserDto } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { UserRole, AuthProvider } from '@/types/user'
 
-// Refer to documentation: https://agent-js.icp.xyz/
+import { usePlugClientStore } from './PlugClient'
+import { useIiClientStore } from './IiClient'
+
 export const useIcpClientStore = defineStore('icpClientStore', () => {
-  let authClient: AuthClient | undefined // can't be stored in ref...
-  const authenticated = ref(false)
-  const identity = ref<Identity>()
-  const actor = ref<ActorSubclass<_SERVICE>>()
+  const plugClient = usePlugClientStore()
+  const iiClient = useIiClientStore()
+  const authProvider = ref<AuthProvider>()
   const user = ref<UserDto>()
   const lockers = ref<LockerDto[]>([])
   const userRole = ref<UserRole | undefined>()
-  const isAuthenticated = computed(() => authenticated.value)
+  const isAuthenticated = computed(() => auth.value?.authenticated)
+  const actor = computed(() => auth.value?.actor)
+  const auth = ref<typeof iiClient | typeof plugClient>()
   const principal = computed(() => {
     return {
-      full: identity.value?.getPrincipal().toString() || '',
-      trimmed: identity.value ? _trimmedPrincipal(identity.value) : ''
+      full: auth.value?.principalId || '',
+      trimmed: auth.value?.principalId ? _trimmedPrincipal(auth.value.principalId) : ''
     }
   })
 
   watch(
-    () => authenticated.value,
-    async (success) => {
-      if (success) {
-        identity.value = authClient!.getIdentity()
-        const agent = new HttpAgent({ identity: identity.value })
-        actor.value = createActor(import.meta.env.VITE_APP_LOCKERS_BACKEND_CANISTER_ID, { agent })
-      }
+    () => {},
+    async () => {
+      await _init().catch((error) => {
+        console.error(error)
+        throw error
+      })
     },
     { immediate: true }
   )
 
-  watchEffect(async () => {
-    await _init().catch((error) => {
-      console.error(error)
-      throw error
-    })
-  })
-
-  async function login(role: UserRole): Promise<void> {
-    await _init(role)
-    if (authenticated.value) {
+  async function _init(): Promise<void> {
+    authProvider.value = localStorage.getItem('authProvider') as AuthProvider
+    userRole.value = localStorage.getItem('userRole') as UserRole
+    if (!authProvider.value || !userRole.value) {
       return
     }
-    authenticated.value = await new Promise((resolve, reject) => {
-      authClient
-        ?.login({
-          identityProvider: import.meta.env.VITE_APP_II_URL,
-          maxTimeToLive: BigInt(1 * 24 * 60 * 60 * 1000 * 1000 * 1000), // 1 day in nanoseconds
-          onSuccess: () => {
-            resolve(true)
-          },
-          onError: (error) => {
-            localStorage.removeItem('role')
-            reject(error)
-          },
-          derivationOrigin: import.meta.env.VITE_APP_II_DERIVATION
-        })
-        .catch((error) => {
-          console.error(error)
-          throw error
-        })
+    if (authProvider.value === 'ii') {
+      auth.value = iiClient as typeof iiClient
+    }
+    if (authProvider.value === 'plug') {
+      auth.value = plugClient as typeof plugClient
+    }
+    await auth.value!.init()
+  }
+
+  async function login(role: UserRole, provider: AuthProvider): Promise<void> {
+    localStorage.setItem('userRole', role)
+    localStorage.setItem('authProvider', provider)
+    await _init()
+    if (isAuthenticated.value) {
+      return
+    }
+    await auth.value!.login().catch((error) => {
+      console.error(error)
+      throw error
     })
   }
 
   async function logout(): Promise<void> {
     try {
-      await authClient?.logout()
+      await auth.value?.logout()
     } catch (error) {
       console.error(error)
     } finally {
@@ -107,43 +101,19 @@ export const useIcpClientStore = defineStore('icpClientStore', () => {
     }
   }
 
-  async function _init(role?: UserRole): Promise<void> {
-    if (role) {
-      localStorage.setItem('role', role)
-    } else {
-      role = localStorage.getItem('role') as UserRole
-    }
-    if (!role) {
-      await _cleanup()
-      return
-    }
-    if (authClient === undefined) {
-      authClient = await AuthClient.create({
-        keyType: 'Ed25519',
-        idleOptions: {
-          // call logout & reload window if idle for <idleTimeout> milliseconds
-          idleTimeout: 10 * 60 * 1000, // 10 minutes
-          onIdle: _cleanup
-        }
-      })
-    }
-    authenticated.value = await authClient.isAuthenticated()
-    userRole.value = role as UserRole
-  }
-
   async function _cleanup() {
-    authClient = undefined
-    identity.value = undefined
+    localStorage.removeItem('userRole')
+    localStorage.removeItem('authProvider')
+    authProvider.value = undefined
+    auth.value = undefined
     user.value = undefined
-    localStorage.removeItem('role')
     userRole.value = undefined
     lockers.value = []
-    authenticated.value = false
     await router.push('login')
   }
 
-  function _trimmedPrincipal(identity: Identity) {
-    const principal = identity.getPrincipal().toString().split('-')
+  function _trimmedPrincipal(principalId: string) {
+    const principal = principalId.split('-')
     return principal ? `${principal[0]}- ... -${principal[principal.length - 1]}` : ''
   }
 

@@ -14,11 +14,11 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: MainLayout,
     redirect: () => {
-      const icpStore = useIcpClientStore()
-      if (icpStore.userRole === 'admin') {
+      const icpClient = useIcpClientStore()
+      if (icpClient.userRole === 'admin') {
         return 'admin'
       }
-      if (icpStore.userRole === 'user') {
+      if (icpClient.userRole === 'user') {
         return 'user'
       }
       return 'login'
@@ -28,13 +28,13 @@ const routes: RouteRecordRaw[] = [
       { path: 'user', component: UserLockerLayout }
     ],
     beforeEnter: (to) => {
-      const icpStore = useIcpClientStore()
-      if (!icpStore.isAuthenticated) {
+      const icpClient = useIcpClientStore()
+      if (!icpClient.isAuthenticated) {
         return 'login'
       }
       if (
-        (to.path.includes('user') && icpStore.userRole === 'admin') ||
-        (to.path.includes('admin') && icpStore.userRole === 'user')
+        (to.path.includes('user') && icpClient.userRole === 'admin') ||
+        (to.path.includes('admin') && icpClient.userRole === 'user')
       ) {
         return 'not-found'
       }

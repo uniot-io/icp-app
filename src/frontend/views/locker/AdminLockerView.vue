@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onMounted, computed, reactive } from 'vue'
+import { ref, onUnmounted, onMounted, computed, reactive, watch } from 'vue'
 import { FormRules, FormInstance } from 'element-plus'
 import { CirclePlus } from '@element-plus/icons-vue'
 import { IPublishPacket } from 'mqtt-packet'
@@ -121,6 +121,22 @@ onMounted(async () => {
   await subscribeDeviceTopics()
   loading.value = false
 })
+
+watch(
+  () => ({
+    id: props.deviceId,
+    device: props.device
+  }),
+  async (newValues, prevValues) => {
+    if (newValues.device && newValues.id !== prevValues?.id) {
+      if (prevValues?.device) {
+        await mqttClient.unsubscribe(deviceStatusTopic(defaultDomain, uniotClient.userId, prevValues.device.name))
+      }
+      await subscribeDeviceTopics()
+    }
+  },
+  { immediate: true }
+)
 
 onUnmounted(async () => {
   console.log('unmounted - unsubscribe')
