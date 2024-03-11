@@ -34,7 +34,7 @@ function initEnv() {
   process.env['VITE_APP_II_DERIVATION'] =
     DFX_NETWORK === 'local'
       ? 'https://2vxsx-fae.icp0.io'
-      : `https://${canisters['lockers_frontend'][DFX_NETWORK]}.icp0.io`
+      : 'https://ddnt2-iiaaa-aaaan-qeceq-cai.icp0.io'
 
   console.log('Use the following .env vars to integrate Internet Identity:')
   console.log(` II_URL=${process.env['VITE_APP_II_URL']}`)
