@@ -13,11 +13,15 @@
     <template v-if="!createLocker" #header>
       <el-row :gutter="20" class="mb-5">
         <el-col :span="6">
+          <span>Name:&nbsp;</span>
+          <span>{{ device?.name }}</span>
+        </el-col>
+        <el-col :span="6">
           <span>Device Status:&nbsp;</span>
           <el-tag v-if="statusOnline" type="success">Online</el-tag>
           <el-tag v-else type="danger">Offline</el-tag>
         </el-col>
-        <el-col :span="18">
+        <el-col :span="6">
           <span>Last Seen:&nbsp;</span>
           <el-tag type="info">{{ statusTimestamp }}</el-tag>
         </el-col>
@@ -36,11 +40,11 @@
         <el-col :span="24">
           <el-text size="large">
             Closed for:
-            <b>l5pok-ej4et-bzudc-575b2-q6zr6-usql4-hrdip-nee3l-wtyic-zfunf-gae</b>
+            <b>{{ form.receiver }}</b>
           </el-text>
         </el-col>
         <el-col class="mt-3">
-          <el-button type="success" @click="stateOpen = true">Open</el-button>
+          <el-button type="success" @click="openLocker()">Open</el-button>
         </el-col>
       </el-row>
     </template>
@@ -68,9 +72,11 @@ import { LockerTemplate } from '@/types/locker'
 import { MqttMessageDeviceStatus } from '@/types/mqtt'
 import LockerOpen from '@/assets/locker-open.svg'
 import LockerClose from '@/assets/locker-close.svg'
+import { Principal } from '@dfinity/principal'
 
 interface UniotLockerDeviceViewProps {
   deviceId: bigint
+  lockerId: bigint
   device: UniotDevice | undefined
   createLocker: boolean
 }
@@ -119,6 +125,7 @@ onMounted(async () => {
     setTimeout(resolve, 500)
   })
   await subscribeDeviceTopics()
+  await getLockerStatus()
   loading.value = false
 })
 
@@ -134,6 +141,16 @@ watch(
       }
       await subscribeDeviceTopics()
     }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => ({
+    lockerId: props.lockerId
+  }),
+  async () => {
+    await getLockerStatus()
   },
   { immediate: true }
 )
@@ -181,10 +198,8 @@ function onStatusMessage(topic: string, message: Buffer, packet: IPublishPacket)
 
 async function createLockerDevice() {
   loading.value = true
-  const topics = [statusTopic.value].map((topic) => ({ topic, msgType: 'cbor' }))
   try {
-    const newLockerId = await icpClient.actor?.createLocker(props.device!.name, LockerTemplate.uniotDevice)
-    await icpClient.actor?.subscribe(newLockerId!, topics)
+    const newLockerId = await icpClient.actor?.createLocker(uniotClient.userId, props.device!.name, 'lock')
     emit('created', { lockerId: newLockerId!, device: props.device! })
   } catch (error) {
     console.error(error)
@@ -192,16 +207,48 @@ async function createLockerDevice() {
   loading.value = false
 }
 
+async function getLockerStatus() {
+  try {
+    const lockerDto = await icpClient.actor?.getLocker(props.lockerId)
+    console.log('getLockerStatus:', lockerDto)
+    if (lockerDto) {
+      const locker = lockerDto[0]
+      stateOpen.value = !locker?.locked || false
+      form.receiver = locker?.receiver.toString() || ''
+    }
+  } catch (error) {
+    console.error(error)
+  }
+}
+
 async function closeLocker(formEl: FormInstance | undefined) {
+  loading.value = true
   try {
     formEl?.clearValidate()
     if (await formEl?.validate()) {
-      // icpClient.actor?.publish()
-      stateOpen.value = false
+      const receiverId = Principal.fromText(form.receiver)
+      const result = await icpClient.actor?.closeLockerFor(props.lockerId, receiverId)
+      if (result) {
+        console.log('close Locker for:', form.receiver)
+        stateOpen.value = false
+      }
     }
-  } catch (_) {
-    //
+  } catch (e) {
+    console.error(e)
   }
+  loading.value = false
+}
+
+async function openLocker() {
+  loading.value = true
+  try {
+    const result = await icpClient.actor?.openLocker(props.lockerId)
+    stateOpen.value = result || false
+  } catch (e) {
+    console.error(e)
+  }
+  loading.value = false
+
 }
 
 function checkReceiver(_: unknown, value: string, callback: (error?: Error) => void) {

@@ -12,9 +12,9 @@
     <locker-view
       v-if="lockersLoaded && (existingLockers.size || historyLockers.size)"
       class="un-inner-right"
-      :device-id="currentDeviceId"
-      :device="currentDevice!"
+      :locker-id="currentLockerId"
       :create-locker="false"
+      @opened="onLockerOpened"
     />
     <el-main
       class="un-empty-inner is-flex justify-center items-center"
@@ -44,26 +44,30 @@ const loading = ref(false)
 const lockersLoaded = ref(false)
 // const devicesLoaded = ref(false)
 
-const uniotDevices = ref<Map<bigint, UniotDevice>>(new Map())
-const deviceStatusWildTopic = computed(() => deviceStatusTopic(defaultDomain, uniotClient.userId, '+'))
+// const uniotDevices = ref<Map<bigint, UniotDevice>>(new Map())
+// const deviceStatusWildTopic = computed(() => deviceStatusTopic(defaultDomain, uniotClient.userId, '+'))
 
 const currentLockerId = ref(ZERO_LOCKER_ID)
 const existingLockers = ref<Map<bigint, LockerMenuItem>>(new Map())
 const historyLockers = ref<Map<bigint, LockerMenuItem>>(new Map())
 
-const currentDevice = computed(() =>
-  uniotDevices.value.get(isCurrentLockerExisted.value ? currentDeviceId.value : currentLockerId.value)
-)
-const currentDeviceId = computed(() => {
-  if (!uniotDevices.value.size) {
-    return ZERO_LOCKER_ID
-  }
-  const deviceName = existingLockers.value.get(currentLockerId.value)?.name
-  return deviceName ? calcDeviceId(deviceName) : ZERO_LOCKER_ID
-})
+// const currentDevice = computed(() =>
+//   uniotDevices.value.get(isCurrentLockerExisted.value ? currentDeviceId.value : currentLockerId.value)
+// )
+// const currentDeviceId = computed(() => {
+//   if (!uniotDevices.value.size) {
+//     return ZERO_LOCKER_ID
+//   }
+//   const deviceName = existingLockers.value.get(currentLockerId.value)?.name
+//   return deviceName ? calcDeviceId(deviceName) : ZERO_LOCKER_ID
+// })
 
-const isCurrentLockerExisted = computed(() => {
-  return existingLockers.value.has(currentLockerId.value)
+// const isCurrentLockerExisted = computed(() => {
+//   return existingLockers.value.has(currentLockerId.value)
+// })
+
+const currentLocker = computed(() => {
+  return existingLockers.value.get(currentLockerId.value)
 })
 
 onMounted(async () => {
@@ -77,13 +81,13 @@ onMounted(async () => {
 })
 
 onUnmounted(async () => {
-  await mqttClient.unsubscribe(deviceStatusWildTopic.value)
+  // await mqttClient.unsubscribe(deviceStatusWildTopic.value)
 })
 
 async function loadUserLockers() {
-  const currentUser = await icpClient.currentUser()
-  if (currentUser.lockers?.length) {
-    const lockers = currentUser.lockers.map(({ id, name, template }) => ({ id, name, template }))
+  const currentReceiver = await icpClient.currentReceiver()
+  if (currentReceiver.lockers?.length) {
+    const lockers = currentReceiver.lockers.map(({ id, name, template }) => ({ id, name, template }))
     existingLockers.value = new Map(lockers.map((locker) => [locker.id, locker]))
     if (currentLockerId.value === ZERO_LOCKER_ID && existingLockers.value.size) {
       currentLockerId.value = existingLockers.value.keys().next().value
@@ -94,6 +98,11 @@ async function loadUserLockers() {
   //   historyLockers.value = new Map(lockers.map((locker) => [locker.id, locker]))
   // }
   lockersLoaded.value = true
+}
+
+function onLockerOpened(item: { lockerId: bigint }) {
+  historyLockers.value.set(item.lockerId, existingLockers.value.get(item.lockerId)!)
+  existingLockers.value.delete(item.lockerId)
 }
 
 // async function subscribeDeviceTopic() {
@@ -121,7 +130,7 @@ async function onSelectLocker({ lockerId }: { lockerId: bigint }) {
   currentLockerId.value = lockerId
 }
 
-function calcDeviceId(deviceId: string): bigint {
-  return BigInt(`0x${deviceId}`)
-}
+// function calcDeviceId(deviceId: string): bigint {
+//   return BigInt(`0x${deviceId}`)
+// }
 </script>

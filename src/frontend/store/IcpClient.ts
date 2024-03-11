@@ -1,21 +1,26 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import router from '@/router'
-import { LockerDto, UserDto } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { OracleDto, UserDto } from '@/../external_declarations/oracles_backend/oracles_backend.did'
+import { LockerDto, ReceiverDto } from '@/../declarations/lockers_backend/lockers_backend.did'
 import { UserRole, AuthProvider } from '@/types/user'
 
 import { usePlugClientStore } from './PlugClient'
 import { useIiClientStore } from './IiClient'
+
+export type OracleLockerDto = OracleDto & LockerDto
 
 export const useIcpClientStore = defineStore('icpClientStore', () => {
   const plugClient = usePlugClientStore()
   const iiClient = useIiClientStore()
   const authProvider = ref<AuthProvider>()
   const user = ref<UserDto>()
-  const lockers = ref<LockerDto[]>([])
+  const receiver = ref<ReceiverDto>()
+  const lockers = ref<OracleLockerDto[]>([])
   const userRole = ref<UserRole | undefined>()
   const isAuthenticated = computed(() => auth.value?.authenticated)
   const actor = computed(() => auth.value?.actor)
+  const oraclesActor = computed(() => auth.value?.oraclesActor)
   const auth = ref<typeof iiClient | typeof plugClient>()
   const principal = computed(() => {
     return {
@@ -73,6 +78,35 @@ export const useIcpClientStore = defineStore('icpClientStore', () => {
     }
   }
 
+  async function currentReceiver() {
+    await _getReceiver()
+    await _getReceiverLockers()
+    return {
+      receiver: receiver.value,
+      lockers: lockers.value
+    }
+  }
+
+  async function _getReceiver() {
+    receiver.value = await actor.value?.getMyReceiver()
+  }
+
+  async function _getReceiverLockers() {
+    lockers.value = []
+    if (receiver.value?.lockers?.length) {
+      for (const lockerId of receiver.value?.lockers) {
+        const oracle = await oraclesActor.value?.getOracle(lockerId)
+        const locker = await actor.value?.getLocker(lockerId)
+
+        if (oracle?.length && locker?.length) {
+          const oracleData = oracle[0] as OracleDto
+          const lockerData = locker[0] as LockerDto
+          lockers.value.push({ ...oracleData, ...lockerData })
+        }
+      }
+    }
+  }
+
   async function currentUser() {
     await _getUser()
     await _getLockers()
@@ -84,7 +118,8 @@ export const useIcpClientStore = defineStore('icpClientStore', () => {
 
   async function _getUser() {
     try {
-      user.value = await actor.value?.getMyUser()
+      user.value = await oraclesActor.value?.getMyUser()
+      console.log('USER:', user.value)
     } catch (err) {
       console.error('USER ERROR:', err)
       throw err
@@ -93,10 +128,16 @@ export const useIcpClientStore = defineStore('icpClientStore', () => {
 
   async function _getLockers() {
     lockers.value = []
-    for (const lockerId of user.value!.lockers) {
-      const locker = await actor.value?.getLocker(lockerId)
-      if (locker?.length) {
-        lockers.value.push(locker[0])
+    if (user.value?.oracles?.length) {
+      for (const oracleId of user.value?.oracles) {
+        const oracle = await oraclesActor.value?.getOracle(oracleId)
+        const locker = await actor.value?.getLocker(oracleId)
+
+        if (oracle?.length && locker?.length) {
+          const oracleData = oracle[0] as OracleDto
+          const lockerData = locker[0] as LockerDto
+          lockers.value.push({ ...oracleData, ...lockerData })
+        }
       }
     }
   }
@@ -123,6 +164,7 @@ export const useIcpClientStore = defineStore('icpClientStore', () => {
     principal,
     actor,
     currentUser,
+    currentReceiver,
     login,
     logout
   }

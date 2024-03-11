@@ -28,8 +28,9 @@ function initEnv() {
   }
 
   process.env['VITE_APP_II_URL'] =
-    // ? `http://localhost:4943/?canisterId=${canisters['internet_identity'][DFX_NETWORK]}`
-    DFX_NETWORK === 'local' ? 'http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:4943' : 'https://identity.ic0.app'
+    DFX_NETWORK === 'local'
+      ? 'http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943'
+      : 'https://identity.ic0.app'
   process.env['VITE_APP_II_DERIVATION'] =
     DFX_NETWORK === 'local'
       ? 'https://2vxsx-fae.icp0.io'
@@ -74,7 +75,7 @@ export default defineConfig({
     'process.env': process.env
   },
   server: {
-    // port: 8081,
+    port: 8082,
     proxy: {
       '/api': {
         target: REPLICA_URL,

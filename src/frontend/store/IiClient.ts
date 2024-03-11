@@ -2,15 +2,18 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { AuthClient } from '@dfinity/auth-client'
 import { ActorSubclass, HttpAgent } from '@dfinity/agent'
-import { createActor } from '@/../declarations/lockers_backend'
-import { _SERVICE } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { createActor as createLockersActor } from '@/../declarations/lockers_backend'
+import { _SERVICE as _LOCKERS_SERVICE } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { createActor as createOraclesActor } from '@/../external_declarations/oracles_backend'
+import { _SERVICE as _ORACLES_SERVICE } from '@/../external_declarations/oracles_backend/oracles_backend.did'
 import router from '@/router'
 
 // Refer to documentation: https://agent-js.icp.xyz/
 export const useIiClientStore = defineStore('iiClientStore', () => {
   let authClient: AuthClient | undefined // can't be stored in ref...
   const authenticated = ref(false)
-  const actor = ref<ActorSubclass<_SERVICE>>()
+  const actor = ref<ActorSubclass<_LOCKERS_SERVICE>>()
+  const oraclesActor = ref<ActorSubclass<_ORACLES_SERVICE>>()
   const principalId = ref<string>()
 
   watch(
@@ -20,7 +23,8 @@ export const useIiClientStore = defineStore('iiClientStore', () => {
         const identity = authClient!.getIdentity()
         principalId.value = identity.getPrincipal().toString()
         const agent = new HttpAgent({ identity })
-        actor.value = createActor(import.meta.env.VITE_APP_LOCKERS_BACKEND_CANISTER_ID, { agent })
+        actor.value = createLockersActor(import.meta.env.VITE_APP_LOCKERS_BACKEND_CANISTER_ID, { agent })
+        oraclesActor.value = createOraclesActor(import.meta.env.VITE_APP_ORACLES_BACKEND_CANISTER_ID, { agent })
       }
     }
   )
@@ -74,6 +78,7 @@ export const useIiClientStore = defineStore('iiClientStore', () => {
     authClient = undefined
     authenticated.value = false
     actor.value = undefined
+    oraclesActor.value = undefined
     principalId.value = undefined
     await router.push('login')
   }
@@ -82,6 +87,7 @@ export const useIiClientStore = defineStore('iiClientStore', () => {
     authenticated,
     principalId,
     actor,
+    oraclesActor,
     init,
     login,
     logout

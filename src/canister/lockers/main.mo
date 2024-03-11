@@ -1,132 +1,127 @@
+import Env "mo:env";
 import Nat "mo:base/Nat";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import RBTree "mo:base/RBTree";
 import TrieMap "mo:base/TrieMap";
 import Principal "mo:base/Principal";
-import Broker "Broker";
-import HttpTypes "HttpTypes";
 import LockerTypes "LockerTypes";
+import OracleTypes "oracles/OracleTypes";
 
 actor {
-
-  // system func preupgrade() {
-  // };
-
-  // system func postupgrade() {
-  // };
-
-  public query func transformBrokerResponse(raw : HttpTypes.TransformArgs) : async HttpTypes.HttpResponsePayload {
-    Broker.transformResponse(raw)
-  };
-
-  let broker = Broker.Broker("mqtt.uniot.io", transformBrokerResponse);
-  var subscriptions : TrieMap.TrieMap<Text, LockerTypes.Subscription> = TrieMap.TrieMap<Text, LockerTypes.Subscription>(Text.equal, Text.hash);
+  let DOMAIN = "PUBLIC_UNIOT";
+  let oracles : OracleTypes.Oracle = actor (Env.ORACLES_CANISTER);
   var lockers : RBTree.RBTree<Nat, LockerTypes.Locker> = RBTree.RBTree<Nat, LockerTypes.Locker>(Nat.compare);
-  var users : TrieMap.TrieMap<Principal, LockerTypes.User> = TrieMap.TrieMap<Principal, LockerTypes.User>(Principal.equal, Principal.hash);
-  /*stable*/ var lockersCounter : Nat = 0;
+  var receivers : TrieMap.TrieMap<Principal, LockerTypes.Receiver> = TrieMap.TrieMap<Principal, LockerTypes.Receiver>(Principal.equal, Principal.hash);
 
-  public shared (msg) func createLocker(name : Text, template : Text) : async Nat {
-    // assert not Principal.isAnonymous(msg.caller);
-    assert name != "";
-    assert template != "";
+  public shared (msg) func createLocker(userId : Text, deviceId : Text, eventId : Text) : async Nat {
+    assert not Principal.isAnonymous(msg.caller);
 
-    let user = switch (users.get(msg.caller)) {
-      case (null) {
-        let newUser = LockerTypes.User(msg.caller);
-        users.put(msg.caller, newUser);
-        newUser
-      };
-      case (?existingUser) existingUser
-    };
+    let oracleId = await oracles.registerOracle(msg.caller, deviceId, "uniot_device");
+    let locker = LockerTypes.Locker(oracleId, DOMAIN, userId, deviceId, eventId);
+    await oracles.subscribe(
+      oracleId,
+      [
+        { topic = locker.topicStatus; msgType = "cbor" },
+        { topic = locker.topicScript; msgType = "cbor" },
+        { topic = locker.topicEvent; msgType = "cbor" }
+      ]
+    );
 
-    let newLocker = LockerTypes.Locker(lockersCounter, msg.caller, name, template);
-    user.putLocker(newLocker);
-    lockers.put(newLocker.id, newLocker);
-    lockersCounter += 1;
-
-    return newLocker.id
+    lockers.put(locker.id, locker);
+    return oracleId
   };
 
-  public shared (msg) func subscribe(lockerId : Nat, subs : [{ topic : Text; msgType : Text }]) {
-    let existingLocker = switch (lockers.get(lockerId)) {
-      case (null) return assert false;
-      case (?locker) locker
+  public shared (msg) func closeLockerFor(id : Nat, receiverId : Principal) : async Bool {
+    assert not Principal.isAnonymous(msg.caller);
+    assert not Principal.isAnonymous(receiverId);
+
+    let receiver = switch (receivers.get(receiverId)) {
+      case (null) {
+        let newReceiver = LockerTypes.Receiver(receiverId);
+        receivers.put(receiverId, newReceiver);
+        newReceiver
+      };
+      case (?existingReceiver) existingReceiver
     };
 
-    assert existingLocker.owner == msg.caller;
-    assert subs.size() > 0;
+    assert not receiver.hasLocker(id);
 
-    for (newSub in subs.vals()) {
-      assert newSub.topic != "";
-      assert newSub.msgType != "";
-      assert switch (existingLocker.subscriptions.get(newSub.topic)) {
-        case null true;
-        case _ false
-      };
+    let oracle = await oracles.getOracle(id);
 
-      let subscription = switch (subscriptions.get(newSub.topic)) {
-        case (null) {
-          let newSubscription = LockerTypes.Subscription(newSub.topic);
-          subscriptions.put(newSub.topic, newSubscription);
-          newSubscription
-        };
-        case (?existingSubscription) existingSubscription
-      };
+    switch (oracle) {
+      case null { false };
+      case (?oracle) {
+        assert oracle.owner == msg.caller;
+        let locker = switch (lockers.get(oracle.id)) {
+          case (null) { assert false; false };
+          case (?locker) {
+            let eventBlob = locker.generateEvent(msg.caller, 1);
+            let (successfullUpdates, _) = await oracles.publish(oracle.id, [{ topic = locker.topicEvent; msg = eventBlob; msgType = "cbor"; signed = true }]);
 
-      existingLocker.subscribe(subscription, newSub.msgType)
-    }
-  };
+            let success = successfullUpdates > 0;
+            if (success) {
+              locker.lock(receiverId);
+              receiver.putLocker(id)
+            };
 
-  private func publish(topic : Text, message : Blob) {
-    switch (subscriptions.get(topic)) {
-      case (null) {
-        assert false
-      };
-      case (?existingSubscription) {
-        existingSubscription.message := message;
-        existingSubscription.timestamp := Time.now();
-        ignore subscriptions.replace(topic, existingSubscription)
+            success
+          }
+        }
       }
     }
   };
 
-  public shared (msg) func syncLocker(lockerId : Nat) : async (Nat, Nat) {
-    let existingLocker = switch (lockers.get(lockerId)) {
-      case (null) { assert false; return (0, 0) };
-      case (?locker) locker
-    };
+  public shared (msg) func openLocker(id : Nat) : async Bool {
+    assert not Principal.isAnonymous(msg.caller);
 
-    assert existingLocker.owner == msg.caller;
+    let oracle = await oracles.getOracle(id);
 
-    await broker.handleRetainedMessages(existingLocker.getSubscriptionsIter(), publish)
-  };
+    switch (oracle) {
+      case null { false };
+      case (?oracle) {
+        let locker = switch (lockers.get(oracle.id)) {
+          case (null) { assert false; false };
+          case (?locker) {
+            assert oracle.owner == msg.caller or locker.receiver == msg.caller;
 
-  public query func getSubscription(topic : Text) : async ?LockerTypes.SubscriptionDto {
-    switch (subscriptions.get(topic)) {
-      case null null;
-      case (?subscription) ?subscription.getDto()
+            let eventBlob = locker.generateEvent(msg.caller, 0);
+            let (successfullUpdates, _) = await oracles.publish(oracle.id, [{ topic = locker.topicEvent; msg = eventBlob; msgType = "cbor"; signed = true }]);
+
+            let success = successfullUpdates > 0;
+            if (success) {
+              switch (receivers.get(locker.receiver)) {
+                case (null) {};
+                case (?receiver) receiver.removeLocker(id)
+              };
+              locker.unlock()
+            };
+
+            success
+          }
+        }
+      }
     }
   };
 
-  public query func getLocker(lockerId : Nat) : async ?LockerTypes.LockerDto {
+  public query func getReceiver(principal : Principal) : async ?LockerTypes.ReceiverDto {
+    return switch (receivers.get(principal)) {
+      case null null;
+      case (?receiver) ?receiver.getDto()
+    }
+  };
+
+  public query (msg) func getMyReceiver() : async LockerTypes.ReceiverDto {
+    return switch (receivers.get(msg.caller)) {
+      case null { { principal = msg.caller; lockers = [] } };
+      case (?receiver) receiver.getDto()
+    }
+  };
+
+  public shared query func getLocker(lockerId : Nat) : async ?LockerTypes.LockerDto {
     switch (lockers.get(lockerId)) {
       case null null;
       case (?locker) ?locker.getDto()
-    }
-  };
-
-  public query func getUser(principal : Principal) : async ?LockerTypes.UserDto {
-    return switch (users.get(principal)) {
-      case null null;
-      case (?user) ?user.getDto()
-    }
-  };
-
-  public query (msg) func getMyUser() : async LockerTypes.UserDto {
-    return switch (users.get(msg.caller)) {
-      case null { { principal = msg.caller; lockers = [] } };
-      case (?user) user.getDto()
     }
   }
 }

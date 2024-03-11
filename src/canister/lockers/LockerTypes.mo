@@ -5,77 +5,103 @@ import Blob "mo:base/Blob";
 import Hash "mo:base/Hash";
 import Array "mo:base/Array";
 import TrieMap "mo:base/TrieMap";
+import Nat8 "mo:base/Nat8";
+import Principal "mo:base/Principal";
+import Debug "mo:base/Debug";
+import Time "mo:base/Time";
+import Int "mo:base/Int";
+import Nat64 "mo:base/Nat64";
 import TrieSetUtils "TrieSetUtils";
+import CborValue "cbor/CborValue";
+import CborEncoder "mo:cbor/Encoder";
 
 module LockerTypes {
 
-  public type SubscriptionDto = {
-    topic : Text;
-    message : Blob;
-    timestamp : Int;
-    refCount : Nat
-  };
+  public let anonymousPrincipal : Blob = "\04";
 
   public type LockerDto = {
     id : Nat;
-    owner : Principal;
-    name : Text;
-    template : Text;
-    subscriptions : [(Text, Text)]
+    receiver : Principal;
+    locked : Bool;
+    topicStatus : Text;
+    topicScript : Text;
+    topicEvent : Text
   };
 
-  public type UserDto = {
+  public type ReceiverDto = {
     principal : Principal;
     lockers : [Nat]
   };
 
-  public class Subscription(_topic : Text) {
-    public let topic = _topic;
-    public var message = Blob.fromArray([]);
-    public var timestamp : Int = 0;
-    public var refCount : Nat = 0;
-
-    public func getDto() : SubscriptionDto { { topic; message; timestamp; refCount } }
-  };
-
-  public class Locker(_id : Nat, _owner : Principal, _name : Text, _template : Text) {
+  public class Locker(_id : Nat, domain : Text, userId : Text, deviceId : Text, eventId : Text) {
     public let id = _id;
-    public let owner = _owner;
-    public let name = _name;
-    public let template = _template;
-    public let subscriptions = TrieMap.TrieMap<Text, Text>(Text.equal, Text.hash);
+    public let topicStatus = domain # "/users/" # userId # "/devices/" # deviceId # "/status";
+    public let topicScript = domain # "/users/" # userId # "/devices/" # deviceId # "/script";
+    public let topicEvent = domain # "/users/" # userId # "/groups/all/event/" # eventId;
+    public let event = eventId;
+    public var receiver : Principal = Principal.fromBlob(anonymousPrincipal);
+
+    public func lock(receiverId : Principal) {
+      receiver := receiverId
+    };
+
+    public func unlock() {
+      receiver := Principal.fromBlob(anonymousPrincipal)
+    };
+
+    public func isLocked() : Bool {
+      receiver != Principal.fromBlob(anonymousPrincipal)
+    };
 
     public func getDto() : LockerDto {
-      let subscriptionsArray = Array.init<(Text, Text)>(subscriptions.size(), ("", ""));
-      var i = 0;
-      for ((key, value) in subscriptions.entries()) {
-        subscriptionsArray[i] := (key, value);
-        i += 1
-      };
-      { id; owner; name; template; subscriptions = Array.freeze<(Text, Text)>(subscriptionsArray) }
+      {
+        id;
+        receiver;
+        locked = isLocked();
+        topicStatus;
+        topicScript;
+        topicEvent
+      }
     };
 
-    public func getSubscriptionsIter() : I.Iter<Text> {
-      subscriptions.keys()
-    };
-
-    public func subscribe(subscription : Subscription, messageType : Text) {
-      subscriptions.put(subscription.topic, messageType);
-      subscription.refCount += 1
+    public func generateEvent(sender : Principal, value : Nat64) : Blob {
+      let timestamp = Nat64.fromNat(Int.abs(Time.now() / 1000000));
+      Debug.print(debug_show (timestamp));
+      let rawMessage = #map([
+        (#text("eventID"), #text(event)),
+        (#text("value"), #uint(value)),
+        (#text("sender"), #map([(#text("type"), #text("icp")), (#text("id"), #text(Principal.toText(sender)))])),
+        (#text("timestamp"), #uint(timestamp))
+      ]);
+      switch (CborEncoder.encode(CborValue.toBasic(rawMessage))) {
+        case (#ok(encoded)) Blob.fromArray(encoded);
+        case (#err e) {
+          Debug.print(debug_show (e));
+          Blob.fromArray([])
+        }
+      }
     }
   };
 
-  public class User(_principal : Principal) {
+  public class Receiver(_principal : Principal) {
     public let principal = _principal;
     public var lockers = TrieSetUtils.Set<Nat>(Nat.equal, Hash.hash);
 
-    public func getDto() : UserDto {
+    public func getDto() : ReceiverDto {
       let lockersArray = lockers.toArray();
       { principal; lockers = lockersArray }
     };
 
-    public func putLocker(locker : Locker) {
-      lockers.put(locker.id)
+    public func putLocker(lockerId : Nat) {
+      lockers.put(lockerId)
+    };
+
+    public func hasLocker(lockerId : Nat) : Bool {
+      lockers.contains(lockerId)
+    };
+
+    public func removeLocker(lockerId : Nat) {
+      lockers.delete(lockerId)
     }
   }
 }

@@ -8,9 +8,9 @@
       <el-button type="success" size="large" @click="login('user', 'ii')" class="ml-0 mb-4">
         Login as user with II
       </el-button>
-      <el-button type="success" size="large" @click="login('user', 'plug')" class="ml-0">
+      <!-- <el-button type="success" size="large" @click="login('user', 'plug')" class="ml-0">
         Login as user with Plug
-      </el-button>
+      </el-button> -->
       <el-alert class="un-login-error" v-if="error" title="Something went wrong..." type="error">
         {{ errorMessage }}
       </el-alert>

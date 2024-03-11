@@ -8,8 +8,8 @@
         </el-menu-item>
       </el-menu-item-group>
       <el-menu-item-group v-if="props.history && props.history.length" title="History">
-        <el-menu-item v-for="locker in props.history" :key="locker.id.toString(10)" :index="locker.id.toString(10)">
-          <el-icon><circle-plus /></el-icon>
+        <el-menu-item class="history" v-for="locker in props.history" :key="locker.id.toString(10)" :index="locker.id.toString(10)" disabled>
+          <el-icon><hide /></el-icon>
           <span>{{ locker.name }}</span>
         </el-menu-item>
       </el-menu-item-group>
@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { Connection, CirclePlus } from '@element-plus/icons-vue'
+import { Connection, CirclePlus, Hide } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useIcpClientStore } from '@/store/IcpClient'
 
@@ -72,5 +72,9 @@ function onSelect(index: string) {
 .un-account {
   position: absolute;
   bottom: 10px;
+}
+
+.history.el-menu-item.is-active {
+  color: orange;
 }
 </style>

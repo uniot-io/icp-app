@@ -1,0 +1,89 @@
+type UserDto = 
+ record {
+   oracles: vec nat;
+   "principal": principal;
+ };
+type TransformArgs = 
+ record {
+   context: blob;
+   response: HttpResponsePayload;
+ };
+type SubscriptionDto = 
+ record {
+   message: blob;
+   refCount: nat;
+   signed: bool;
+   timestamp: int;
+   topic: text;
+   verified: bool;
+ };
+type Result_1 = 
+ variant {
+   err: Error;
+   ok: text;
+ };
+type Result = 
+ variant {
+   err: Error;
+   ok: bool;
+ };
+type PublicationDto = 
+ record {
+   message: blob;
+   messageType: text;
+   oracleId: nat;
+   signed: bool;
+   timestamp: int;
+   topic: text;
+ };
+type OracleDto = 
+ record {
+   id: nat;
+   name: text;
+   owner: principal;
+   publications: vec text;
+   subscriptions: vec record {
+                        text;
+                        text;
+                      };
+   template: text;
+ };
+type HttpResponsePayload = 
+ record {
+   body: vec nat8;
+   headers: vec HttpHeader;
+   status: nat;
+ };
+type HttpHeader = 
+ record {
+   name: text;
+   value: text;
+ };
+type Error = variant {msg: text;};
+service : {
+  brokerPublicKey: () -> (text);
+  createOracle: (text, text) -> (nat);
+  getMyUser: () -> (UserDto) query;
+  getOracle: (nat) -> (opt OracleDto) query;
+  getPublication: (text) -> (opt PublicationDto) query;
+  getSubscription: (text) -> (opt SubscriptionDto) query;
+  getUser: (principal) -> (opt UserDto) query;
+  public_key: () -> (Result_1);
+  publish: (nat,
+   vec record {
+         msg: blob;
+         msgType: text;
+         signed: bool;
+         topic: text;
+       }) -> (nat, nat);
+  publishRetainedMessage: (text, text) -> (bool, nat);
+  sign: (text) -> (Result_1);
+  signCose: (text) -> (Result_1);
+  subscribe: (nat, vec record {
+                         msgType: text;
+                         topic: text;
+                       }) -> () oneway;
+  syncOracle: (nat, bool) -> (nat, nat);
+  transformBrokerResponse: (TransformArgs) -> (HttpResponsePayload) query;
+  verifyCose: (text, text) -> (Result);
+}

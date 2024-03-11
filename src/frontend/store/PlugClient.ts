@@ -2,30 +2,37 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { ActorSubclass } from '@dfinity/agent'
 
-import { idlFactory } from '@/../declarations/lockers_backend'
-import { _SERVICE } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { idlFactory as lockersIdlFactory } from '@/../declarations/lockers_backend'
+import { _SERVICE as _LOCKERS_SERVICE } from '@/../declarations/lockers_backend/lockers_backend.did'
+import { idlFactory as oraclesIdlFactory} from '@/../external_declarations/oracles_backend'
+import { _SERVICE as _ORACLES_SERVICE } from '@/../external_declarations/oracles_backend/oracles_backend.did'
 
 import type { PublicKey } from '@/types/plug'
 
 export const usePlugClientStore = defineStore('plugClientStore', () => {
   const publicKey = ref<PublicKey>()
   const authenticated = ref(false)
-  const actor = ref<ActorSubclass<_SERVICE>>()
+  const actor = ref<ActorSubclass<_LOCKERS_SERVICE>>()
+  const oraclesActor = ref<ActorSubclass<_ORACLES_SERVICE>>()
   const principalId = ref<string>()
   const plug = computed(() => window.ic?.plug)
 
   async function _postLogin() {
     actor.value = await plug.value.createActor({
       canisterId: import.meta.env.VITE_APP_LOCKERS_BACKEND_CANISTER_ID,
-      interfaceFactory: idlFactory
+      interfaceFactory: lockersIdlFactory
     })
+    oraclesActor.value = await plug.value.createActor({
+      canisterId: import.meta.env.VITE_APP_ORACLES_BACKEND_CANISTER_ID,
+      interfaceFactory: oraclesIdlFactory
+    }) as unknown as ActorSubclass<_ORACLES_SERVICE> // Add explicit type assertion
     principalId.value = plug.value.principalId
     authenticated.value = true
   }
 
   async function init() {
     await _verifyPlug()
-    if (actor.value === undefined && principalId.value === undefined) {
+    if (actor.value === undefined && oraclesActor.value === undefined && principalId.value === undefined) {
       const connected = await plug.value.isConnected()
       if (connected && plug.value.principalId) {
         await _postLogin()
@@ -78,6 +85,7 @@ export const usePlugClientStore = defineStore('plugClientStore', () => {
   async function _cleanup() {
     publicKey.value = undefined
     actor.value = undefined
+    oraclesActor.value = undefined
     principalId.value = undefined
     authenticated.value = false
   }
@@ -86,6 +94,7 @@ export const usePlugClientStore = defineStore('plugClientStore', () => {
     principalId,
     authenticated,
     actor,
+    oraclesActor,
     init,
     login,
     logout

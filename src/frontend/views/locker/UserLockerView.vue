@@ -8,18 +8,28 @@
     <template #header>
       <el-row :gutter="20" class="mb-5">
         <el-col :span="6">
+          <span>Name:&nbsp;</span>
+          <span>{{ lockerData?.name }}</span>
+        </el-col>
+        <el-col :span="6">
           <span>Device Status:&nbsp;</span>
           <el-tag v-if="statusOnline" type="success">Online</el-tag>
           <el-tag v-else type="danger">Offline</el-tag>
         </el-col>
-        <el-col :span="18">
+        <el-col :span="6">
           <span>Last Seen:&nbsp;</span>
           <el-tag type="info">{{ statusTimestamp }}</el-tag>
         </el-col>
       </el-row>
+      <el-row >
+        <el-text size="large">
+          Closed by:
+          <b>{{ lockerData?.owner }}</b>
+        </el-text>
+      </el-row>
       <el-row>
         <el-col :span="3">
-          <el-button class="px-6 py-4" v-if="!stateOpen" @click="openLocker" type="success">Open</el-button>
+          <el-button class="my-4 px-6 py-4" v-if="!stateOpen" @click="openLocker" type="success">Open</el-button>
         </el-col>
       </el-row>
     </template>
@@ -33,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onMounted, computed } from 'vue'
+import { ref, onUnmounted, onMounted, computed, watch } from 'vue'
 import { IPublishPacket } from 'mqtt-packet'
 // import { useIcpClientStore } from '@/store/IcpClient'
 import { useMqttStore } from '@/store/MqttStore'
@@ -44,20 +54,20 @@ import { UniotDevice } from '@/types/uniot'
 import { MqttMessageDeviceStatus } from '@/types/mqtt'
 import LockerOpen from '@/assets/locker-open.svg'
 import LockerClose from '@/assets/locker-close.svg'
+import { OracleLockerDto, useIcpClientStore } from '@/store/IcpClient'
 
 interface UniotLockerDeviceViewProps {
-  deviceId: bigint
-  device: UniotDevice | undefined
+  lockerId: bigint
 }
 
-// type UniotDeviceEmits = {
-//   (e: 'created', item: { lockerId: bigint; device: UniotDevice }): void
-// }
+type LockerEmits = {
+  (e: 'opened', item: { lockerId: bigint }): void
+}
 
 const props = defineProps<UniotLockerDeviceViewProps>()
-// const emit = defineEmits<UniotDeviceEmits>()
+const emit = defineEmits<LockerEmits>()
 
-// const icpClient = useIcpClientStore()
+const icpClient = useIcpClientStore()
 const mqttClient = useMqttStore()
 const uniotClient = useUniotStore()
 const loading = ref(false)
@@ -67,8 +77,21 @@ const statusOnline = ref(false)
 const stateOpen = ref(false)
 const statusTimestamp = ref(Date.now().toLocaleString())
 
-const statusTopic = computed(() => deviceStatusTopic(defaultDomain, uniotClient.userId, props.device!.name))
-// const stateTopic = computed(() => deviceLockerTopic(defaultDomain, uniotClient.userId, props.device.name))
+const lockerData = ref<OracleLockerDto>()
+
+const statusTopic = ref('')
+
+watch(
+  () => ({
+    lockerId: props.lockerId,
+  }),
+  async () => {
+    await unsubscribeDeviceTopics()
+    await setLockerData()
+    await subscribeDeviceTopics()
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   loading.value = true
@@ -76,13 +99,27 @@ onMounted(async () => {
   await new Promise((resolve) => {
     setTimeout(resolve, 500)
   })
+  await setLockerData()
+  console.log('lockerData:', lockerData.value)
   await subscribeDeviceTopics()
   loading.value = false
 })
 
 onUnmounted(async () => {
-  await mqttClient.unsubscribe(statusTopic.value)
+  await unsubscribeDeviceTopics()
 })
+
+async function setLockerData() {
+  const currentReceiver = await icpClient.currentReceiver()
+  if (currentReceiver.lockers?.length) {
+    const found = currentReceiver.lockers.find((locker) => locker.id === props.lockerId)
+    if (found) {
+      lockerData.value = found as OracleLockerDto
+      statusTopic.value = lockerData.value.topicStatus
+      stateOpen.value = !lockerData.value.locked
+    }
+  }
+}
 
 async function subscribeDeviceTopics() {
   try {
@@ -90,12 +127,14 @@ async function subscribeDeviceTopics() {
   } catch (error) {
     console.error(`failed to subscribe to topic: ${error}`)
   }
+}
 
-  // try {
-  //   await mqttClient.subscribe(stateTopic.value, onStateMessage)
-  // } catch (error) {
-  //   console.error(`failed to subscribe to topic: ${error}`)
-  // }
+async function unsubscribeDeviceTopics() {
+  try {
+    await mqttClient.unsubscribe(statusTopic.value)
+  } catch (error) {
+    console.error(`failed to unsubscribe from topic: ${error}`)
+  }
 }
 
 function onStatusMessage(topic: string, message: Buffer, packet: IPublishPacket) {
@@ -108,17 +147,16 @@ function onStatusMessage(topic: string, message: Buffer, packet: IPublishPacket)
   }
 }
 
-// function onStateMessage(topic: string, message: Buffer, packet: IPublishPacket) {
-//   if (packet.retain) {
-//     // const status = decodeIntoJSON<MqttMessageDeviceEvent>(message, 'CBOR')
-//     // statusParsed.value = decodeIntoString(message, 'CBOR')
-//     // statusOnline.value = Boolean(status.online)
-//     // statusTimestamp.value = new Date(status.timestamp * 1_000).toLocaleString()
-//   }
-// }
-
 async function openLocker() {
-  stateOpen.value = true
+  loading.value = true
+  try {
+    const result = await icpClient.actor?.openLocker(props.lockerId)
+    emit('opened', { lockerId: props.lockerId })
+    stateOpen.value = result || false
+  } catch (e) {
+    console.error(e)
+  }
+  loading.value = false
 }
 </script>
 

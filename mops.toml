@@ -1,0 +1,4 @@
+[dependencies]
+env = "./src/canister/env-{MOPS_ENV}"
+base = "0.10.2"
+cbor = "https://github.com/gekctek/motoko_cbor#v1.0.1"

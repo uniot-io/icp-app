@@ -14,6 +14,7 @@
         v-if="isCurrentLockerExisted"
         class="un-inner-right"
         :device-id="currentDeviceId"
+        :locker-id="currentLockerId"
         :device="currentDevice!"
         :create-locker="false"
       />
@@ -21,6 +22,7 @@
         class="un-inner-right"
         v-else-if="suggestedLockers.length"
         :device-id="currentLockerId"
+        :locker-id="currentLockerId"
         :device="currentDevice!"
         :create-locker="true"
         @created="onLockerCreated"
